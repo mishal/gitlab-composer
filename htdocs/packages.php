@@ -6,6 +6,7 @@ use Gitlab\Client;
 use Gitlab\Exception\RuntimeException;
 
 $packages_file = __DIR__ . '/../cache/packages.json';
+$static_file = __DIR__.'/../confs/static-repos.json';
 $ttl = 0; // seconds
 
 /**
@@ -167,6 +168,11 @@ $packages = array();
 foreach ($all_projects as $project) {
     if ($package = $load_data($project)) {
         $packages[$project['path_with_namespace']] = $package;
+    }
+}
+if (file_exists($static_file)) {
+    foreach (json_decode(file_get_contents($static_file)) as $name => $package) {
+        $packages[$name] = $package;
     }
 }
 $data = json_encode(array(
