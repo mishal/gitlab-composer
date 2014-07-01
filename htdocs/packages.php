@@ -9,6 +9,17 @@ $packages_file = __DIR__ . '/../cache/packages.json';
 $static_file = __DIR__.'/../confs/static-repos.json';
 $ttl = 0; // seconds
 
+// See ../confs/samples/gitlab.ini
+$config_file = __DIR__ . '/../confs/gitlab.ini';
+if (!file_exists($config_file)) {
+    header('HTTP/1.0 500 Internal Server Error');
+    die('confs/gitlab.ini missing');
+}
+$confs = parse_ini_file($config_file);
+if ( isset( $confs['ttl'] ) ) {
+	$ttl = $confs['ttl'];
+}
+
 /**
  * Output a json file, sending max-age header, then dies
  */
@@ -28,14 +39,6 @@ $outputFile = function ($file) use ($ttl) {
 if (file_exists($packages_file)) {
     $outputFile($packages_file);
 }
-
-// See ../confs/samples/gitlab.ini
-$config_file = __DIR__ . '/../confs/gitlab.ini';
-if (!file_exists($config_file)) {
-    header('HTTP/1.0 500 Internal Server Error');
-    die('confs/gitlab.ini missing');
-}
-$confs = parse_ini_file($config_file);
 
 $client = new Client($confs['endpoint']);
 $client->authenticate($confs['api_key'], Client::AUTH_URL_TOKEN);
