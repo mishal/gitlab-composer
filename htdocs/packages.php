@@ -40,6 +40,18 @@ if (file_exists($packages_file)) {
     $outputFile($packages_file);
 }
 
+if ( isset( $confs['branches'] ) ) {
+    if ( is_array( $confs['branches'] ) ) {
+        $branchesToInclude = $confs['branches'];
+    }
+    else {
+        $branchesToInclude = array( $confs['branches'] );
+    }
+}
+else {
+    $branchesToInclude = array('master');
+}
+
 $client = new Client($confs['endpoint']);
 $client->authenticate($confs['api_key'], Client::AUTH_URL_TOKEN);
 
@@ -77,9 +89,9 @@ $fetch_composer = function($project, $ref) use ($repos) {
  * @param string $ref commit id
  * @return array   [$version => ['name' => $name, 'version' => $version, 'source' => [...]]]
  */
-$fetch_ref = function($project, $ref) use ($fetch_composer) {
-    if ($ref['name'] == 'master') {
-        $version = 'dev-master';
+$fetch_ref = function($project, $ref) use ($fetch_composer, $branchesToInclude) {
+    if ( in_array( $ref['name'], $branchesToInclude ) ) {
+        $version = 'dev-' . $ref['name'];
     } elseif (preg_match('/^v?\d+\.\d+(\.\d+)*(\-(dev|patch|alpha|beta|RC)\d*)?$/', $ref['name'])) {
         $version = $ref['name'];
     } else {
