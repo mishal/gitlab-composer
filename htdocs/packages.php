@@ -6,7 +6,11 @@ use Gitlab\Client;
 use Gitlab\Exception\RuntimeException;
 
 $packages_file = __DIR__ . '/../cache/packages.json';
-$ttl = 0; // seconds
+
+$ttl = 3600;
+if (isset($_GET['refresh'])) {
+    $ttl = 0;
+}
 
 /**
  * Output a json file, sending max-age header, then dies
