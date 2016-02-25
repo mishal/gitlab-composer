@@ -1,0 +1,22 @@
+{
+	"bige/sitech": {
+		"1.2": {
+			"name": "BigE/SiTech",
+			"version": "1.2",
+			"source": {
+				"url": "https://github.com/BigE/SiTech",
+				"type": "git",
+				"reference": "release-1.2"
+			},
+			"autoload": {
+				"classmap": ["lib/"],
+				"psr-0": {"SiTech\\": "lib/"}
+			},
+			"autoload-dev": {
+				"classmap": [
+					"Tests/", "Tools/"
+				]
+			}
+		}
+	}
+}

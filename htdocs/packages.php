@@ -7,28 +7,25 @@ use Gitlab\Exception\RuntimeException;
 
 $packages_file = __DIR__ . '/../cache/packages.json';
 
-$ttl = 3600;
-if (isset($_GET['refresh'])) {
-    $ttl = 0;
-}
-
 /**
  * Output a json file, sending max-age header, then dies
  */
-$outputFile = function ($file) use ($ttl) {
+$outputFile = function ($file) {
     $mtime = filemtime($file);
 
-    if (time() <= $mtime + $ttl) {
-        header('Content-Type: application/json');
-        header('Cache-Control: max-age=' . $ttl);
-        header('Last-Modified: ' . gmdate('r', $mtime));
+    header('Content-Type: application/json');
+    header('Last-Modified: ' . gmdate('r', $mtime));
+    header('Cache-Control: max-age=0');
+
+    if (!empty($_SERVER['HTTP_IF_MODIFIED_SINCE']) && ($since = strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE'])) && $since >= $mtime) {
+        header('HTTP/1.0 304 Not Modified');
+    } else {
         readfile($file);
-        die();
     }
+    die();
 };
 
-// Full page cache
-if (file_exists($packages_file)) {
+if (!isset($_GET['refresh']) && is_readable($packages_file)) {
     $outputFile($packages_file);
 }
 
@@ -44,7 +41,6 @@ $client = new Client($confs['endpoint']);
 $client->authenticate($confs['api_key'], Client::AUTH_URL_TOKEN);
 
 $projects = $client->api('projects');
-$groups = $client->api('groups');
 $repos = $client->api('repositories');
 
 /**
@@ -54,11 +50,12 @@ $repos = $client->api('repositories');
  * @param string $ref commit id
  * @return array|false
  */
-$fetch_composer = function($project, $ref) use ($repos) {
+$fetch_composer = function ($project, $ref) use ($repos) {
+
     try {
-        $data = array();
-        $c = $repos->blob($project['id'], $ref, 'composer.json');
-        $composer = is_array($c) ? $c : json_decode($c, true);
+        $c = $repos->getFile($project['id'], 'composer.json', $ref);
+        $content = base64_decode($c['content']);
+        $composer = json_decode($content, true);
 
         if (empty($composer['name']) || $composer['name'] != $project['path_with_namespace']) {
             return false; // packages must have a name and must match
@@ -77,20 +74,18 @@ $fetch_composer = function($project, $ref) use ($repos) {
  * @param string $ref commit id
  * @return array   [$version => ['name' => $name, 'version' => $version, 'source' => [...]]]
  */
-$fetch_ref = function($project, $ref) use ($fetch_composer) {
-    if ($ref['name'] == 'master') {
-        $version = 'dev-master';
-    } elseif (preg_match('/^v?\d+\.\d+(\.\d+)*(\-(dev|patch|alpha|beta|RC)\d*)?$/', $ref['name'])) {
+$fetch_ref = function ($project, $ref) use ($fetch_composer) {
+    if (preg_match('/^v?\d+\.\d+(\.\d+)*(\-(dev|patch|alpha|beta|RC)\d*)?$/', $ref['name'])) {
         $version = $ref['name'];
     } else {
-        return array();
+        $version = 'dev-' . $ref['name'];
     }
 
     if (($data = $fetch_composer($project, $ref['commit']['id'])) !== false) {
         $data['version'] = $version;
         $data['source'] = array(
-            'url'       => $project['ssh_url_to_repo'],
-            'type'      => 'git',
+            'url' => $project['ssh_url_to_repo'],
+            'type' => 'git',
             'reference' => $ref['commit']['id'],
         );
 
@@ -105,7 +100,7 @@ $fetch_ref = function($project, $ref) use ($fetch_composer) {
  * @param array $project
  * @return array   Same as $fetch_ref, but for all refs
  */
-$fetch_refs = function($project) use ($fetch_ref, $repos) {
+$fetch_refs = function ($project) use ($fetch_ref, $repos) {
     $datas = array();
 
     foreach (array_merge($repos->branches($project['id']), $repos->tags($project['id'])) as $ref) {
@@ -124,9 +119,9 @@ $fetch_refs = function($project) use ($fetch_ref, $repos) {
  * @param array $project
  * @return array Same as $fetch_refs
  */
-$load_data = function($project) use ($fetch_refs) {
-    $file    = __DIR__ . "/../cache/{$project['path_with_namespace']}.json";
-    $mtime   = strtotime($project['last_activity_at']);
+$load_data = function ($project) use ($fetch_refs) {
+    $file = __DIR__ . "/../cache/{$project['path_with_namespace']}.json";
+    $mtime = strtotime($project['last_activity_at']);
 
     if (!is_dir(dirname($file))) {
         mkdir(dirname($file), 0777, true);
@@ -153,30 +148,34 @@ $load_data = function($project) use ($fetch_refs) {
 };
 
 $all_projects = array();
+$mtime = 0;
 
-/**
- * Load all groups (max 1000, on 1 page), then load all projects for this group
- * It is not possible to directly load all projects
- * @link https://github.com/gitlabhq/gitlabhq/issues/3839
- */
-foreach ($groups->all(1, 1000) as $group) {
-    $g = $groups->show($group['id']);
+$me = $client->api('users')->me();
+if ((bool)$me['is_admin']) {
+    $projects_api_method = 'all';
+} else {
+    $projects_api_method = 'accessible';
+}
 
-    foreach ($g['projects'] as $project) {
+for ($page = 1; count($p = $projects->$projects_api_method($page, 100)); $page++) {
+    foreach ($p as $project) {
         $all_projects[] = $project;
+        $mtime = max($mtime, strtotime($project['last_activity_at']));
     }
 }
 
-$packages = array();
-foreach ($all_projects as $project) {
-    if ($package = $load_data($project)) {
-        $packages[$project['path_with_namespace']] = $package;
+if (!file_exists($packages_file) || filemtime($packages_file) < $mtime) {
+    $packages = array();
+    foreach ($all_projects as $project) {
+        if ($package = $load_data($project)) {
+            $packages[$project['path_with_namespace']] = $package;
+        }
     }
-}
-$data = json_encode(array(
-    'packages' => array_filter($packages),
-));
+    $data = json_encode(array(
+        'packages' => array_filter($packages),
+    ));
 
-file_put_contents($packages_file, $data);
+    file_put_contents($packages_file, $data);
+}
 
 $outputFile($packages_file);
