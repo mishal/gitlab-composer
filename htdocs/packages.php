@@ -2,7 +2,7 @@
 
 require __DIR__ . '/../vendor/autoload.php';
 
-use Gitlab\Client;
+use ExtendedGitlab\Client;
 use Gitlab\Exception\RuntimeException;
 
 $packages_file = __DIR__ . '/../cache/packages.json';
@@ -29,13 +29,7 @@ if (!isset($_GET['refresh']) && is_readable($packages_file)) {
     $outputFile($packages_file);
 }
 
-// See ../confs/samples/gitlab.ini
-$config_file = __DIR__ . '/../confs/gitlab.ini';
-if (!file_exists($config_file)) {
-    header('HTTP/1.0 500 Internal Server Error');
-    die('confs/gitlab.ini missing');
-}
-$confs = parse_ini_file($config_file);
+$confs = include __DIR__ . '/_bootstrap.php';
 
 $client = new Client($confs['endpoint']);
 $client->authenticate($confs['api_key'], Client::AUTH_URL_TOKEN);
@@ -95,7 +89,16 @@ $fetch_ref = function ($project, $ref) use ($fetch_composer) {
             'url' => $project[method . '_url_to_repo'],
             'reference' => $ref['commit']['id'],
         );
-
+        // redirect
+        $path = (isset($_SERVER['HTTPS']) ? 'https:' : 'http:') . '//' . $_SERVER['HTTP_HOST'] . ltrim(dirname($_SERVER['PHP_SELF'], '/'));
+        $downloadUrl = $path . '/download.php?' . http_build_query([
+            'id' => $project['id'],
+            'ref' => $ref['commit']['id']
+        ]);
+        $data['dist'] = array(
+            'type' => 'tar',
+            'url' => $downloadUrl,
+        );
         return array($version => $data);
     } else {
         return array();
