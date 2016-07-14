@@ -43,6 +43,13 @@ $client->authenticate($confs['api_key'], Client::AUTH_URL_TOKEN);
 $projects = $client->api('projects');
 $repos = $client->api('repositories');
 
+$validMethods = array('ssh', 'http');
+if (isset($confs['method']) && in_array($confs['method'], $validMethods)) {
+    define('method', $confs['method']);
+} else {
+    define('method', 'ssh');
+}
+
 /**
  * Retrieves some information about a project's composer.json
  *
@@ -84,8 +91,8 @@ $fetch_ref = function ($project, $ref) use ($fetch_composer) {
     if (($data = $fetch_composer($project, $ref['commit']['id'])) !== false) {
         $data['version'] = $version;
         $data['source'] = array(
-            'url' => $project['ssh_url_to_repo'],
             'type' => 'git',
+            'url' => $project[method . '_url_to_repo'],
             'reference' => $ref['commit']['id'],
         );
 
@@ -103,10 +110,14 @@ $fetch_ref = function ($project, $ref) use ($fetch_composer) {
 $fetch_refs = function ($project) use ($fetch_ref, $repos) {
     $datas = array();
 
-    foreach (array_merge($repos->branches($project['id']), $repos->tags($project['id'])) as $ref) {
-        foreach ($fetch_ref($project, $ref) as $version => $data) {
-            $datas[$version] = $data;
+    try {
+        foreach (array_merge($repos->branches($project['id']), $repos->tags($project['id'])) as $ref) {
+            foreach ($fetch_ref($project, $ref) as $version => $data) {
+                $datas[$version] = $data;
+            }
         }
+    } catch (RuntimeException $e) {
+        // The repo has no commits — skipping it.
     }
 
     return $datas;
